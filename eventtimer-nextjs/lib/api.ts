@@ -1,0 +1,100 @@
+import { Market } from '@/types/market';
+
+// 使用Next.js API路由代理(Polymarket API不支持浏览器CORS)
+const API_PROXY = '/api/markets';
+const MIN_LIQUIDITY = 1000;
+
+export class PolymarketAPI {
+  static async fetchMarkets(limit: number = 100): Promise<Market[]> {
+    try {
+      const now = new Date().toISOString();
+
+      const params = new URLSearchParams({
+        closed: 'false',
+        end_date_min: now,
+        order: 'endDate',
+        ascending: 'true',
+        limit: limit.toString(),
+      });
+
+      // 通过Next.js API路由代理
+      const url = `${API_PROXY}?${params}`;
+      const response = await fetch(url, {
+        cache: 'default',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return this.processMarkets(data);
+    } catch (error) {
+      console.error('❌ API Error:', error);
+      throw error;
+    }
+  }
+
+  private static processMarkets(markets: any[]): Market[] {
+    const now = new Date();
+
+    return markets
+      .map(market => {
+        // Extract deadline with correct priority: endDate > gameStartTime > endDateIso
+        let deadline: Date | null = null;
+
+        if (market.endDate) {
+          const d = new Date(market.endDate);
+          if (!isNaN(d.getTime())) deadline = d;
+        }
+
+        if (!deadline && market.gameStartTime) {
+          const d = new Date(market.gameStartTime);
+          if (!isNaN(d.getTime())) deadline = d;
+        }
+
+        if (!deadline && market.endDateIso) {
+          const d = new Date(market.endDateIso);
+          if (!isNaN(d.getTime())) deadline = d;
+        }
+
+        if (!deadline) return null;
+
+        // Calculate urgency
+        const hoursUntil = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
+        let urgency: 'critical' | 'urgent' | 'soon' | 'normal' = 'normal';
+
+        if (hoursUntil < 1) urgency = 'critical';
+        else if (hoursUntil < 24) urgency = 'urgent';
+        else if (hoursUntil < 168) urgency = 'soon'; // 7 days
+
+        return {
+          ...market,
+          _deadline: deadline,
+          _urgency: urgency,
+          _hoursUntil: hoursUntil,
+          endDate: deadline.toISOString(),
+        };
+      })
+      .filter((market): market is Market => {
+        if (!market) return false;
+
+        // Filter by liquidity
+        const liquidity = parseFloat(market.liquidity || market.liquidityNum || '0');
+        return liquidity >= MIN_LIQUIDITY && market._deadline! > now;
+      })
+      .sort((a, b) => {
+        // Sort by deadline (soonest first)
+        return a._deadline!.getTime() - b._deadline!.getTime();
+      });
+  }
+
+  static getMarketUrl(market: Market): string {
+    // Generate Polymarket URL for the market
+    if (market.slug) {
+      return `https://polymarket.com/event/${market.slug}`;
+    }
+    // Fallback: use market ID
+    return `https://polymarket.com/market/${market.id}`;
+  }
+}

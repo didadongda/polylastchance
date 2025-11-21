@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EventTimer Pro - Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* 使用原有CSS，只调整pills部分 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        :root {
+            --color-primary: #007AFF;
+            --color-secondary: #5856D6;
+            --color-success: #34C759;
+            --color-warning: #FF9500;
+            --color-danger: #FF3B30;
+            --bg-primary: #000000;
+            --bg-secondary: #1C1C1E;
+            --bg-tertiary: #2C2C2E;
+            --bg-elevated: #3A3A3C;
+            --bg-glass: rgba(28, 28, 30, 0.72);
+            --text-primary: #FFFFFF;
+            --text-secondary: #EBEBF5;
+            --text-tertiary: #EBEBF599;
+            --separator: #38383A;
+            --border-radius: 12px;
+            --border-radius-lg: 20px;
+            --blur-amount: 40px;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 20px;
+        }
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        .pills-container {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+        }
+        .pill {
+            padding: 12px 24px;
+            background: var(--bg-tertiary);
+            border: 1px solid transparent;
+            border-radius: 20px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pill:hover {
+            background: var(--bg-elevated);
+        }
+        .pill.active {
+            background: var(--color-primary);
+            color: white;
+        }
+        .pill-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+        }
+        .markets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 24px;
+        }
+        .market-card {
+            background: var(--bg-glass);
+            border: 1px solid var(--separator);
+            border-radius: var(--border-radius-lg);
+            padding: 24px;
+        }
+        .market-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .countdown-display {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .time-unit {
+            flex: 1;
+            text-align: center;
+            background: var(--bg-elevated);
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .time-value {
+            display: block;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--color-primary);
+        }
+        .time-label {
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+        }
+        .market-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .detail-item {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .detail-label {
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+            margin-bottom: 4px;
+        }
+        .detail-value {
+            font-size: 1rem;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⏰ EventTimer Pro</h1>
+            <p style="color: var(--text-tertiary);">实时追踪 Polymarket 即将到期市场 (流动性≥$1K)</p>
+        </div>
+
+        <div class="pills-container">
+            <button class="pill active" data-filter="all">
+                <span>🌐 全部</span>
+                <span class="pill-badge" id="count-all">0</span>
+            </button>
+            <button class="pill" data-filter="urgent">
+                <span>🔥 24小时内</span>
+                <span class="pill-badge" id="count-urgent">0</span>
+            </button>
+            <button class="pill" data-filter="favorites">
+                <span>⭐ 收藏</span>
+                <span class="pill-badge" id="count-favorites">0</span>
+            </button>
+        </div>
+
+        <div id="markets-grid" class="markets-grid">
+            <p style="text-align: center; color: var(--text-tertiary);">正在加载...</p>
+        </div>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

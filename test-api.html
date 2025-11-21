@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket Event Timer - Technical Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-card h3 {
+            margin: 0 0 5px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .market-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .market-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #4CAF50;
+        }
+        .market-card.urgent {
+            border-left-color: #f44336;
+        }
+        .market-card.soon {
+            border-left-color: #ff9800;
+        }
+        .market-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+        .market-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .countdown {
+            font-size: 20px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        .countdown.urgent {
+            color: #f44336;
+        }
+        .countdown.soon {
+            color: #ff9800;
+        }
+        .end-date {
+            color: #666;
+            font-size: 14px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 8px;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .filter-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .filter-tab {
+            padding: 10px 20px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .filter-tab.active {
+            background: #2196F3;
+            color: white;
+        }
+        .filter-tab:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⏰ Polymarket Event Timer - Technical Test</h1>
+        <p>测试 Polymarket API 的纯前端实现可行性</p>
+    </div>
+
+    <div id="error-container"></div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <h3>总市场数</h3>
+            <div class="value" id="total-markets">-</div>
+        </div>
+        <div class="stat-card">
+            <h3>24小时内到期</h3>
+            <div class="value" id="urgent-markets">-</div>
+        </div>
+        <div class="stat-card">
+            <h3>7天内到期</h3>
+            <div class="value" id="week-markets">-</div>
+        </div>
+        <div class="stat-card">
+            <h3>API 响应时间</h3>
+            <div class="value" id="api-time">-</div>
+        </div>
+    </div>
+
+    <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">全部</button>
+        <button class="filter-tab" data-filter="urgent">24小时内</button>
+        <button class="filter-tab" data-filter="soon">7天内</button>
+        <button class="filter-tab" data-filter="week">本周</button>
+    </div>
+
+    <div id="market-list">
+        <div class="loading">加载中...</div>
+    </div>
+
+    <script>
+        const API_URL = 'https://gamma-api.polymarket.com/markets';
+        let allMarkets = [];
+        let currentFilter = 'all';
+
+        // 获取市场数据
+        async function fetchMarkets() {
+            const startTime = Date.now();
+            try {
+                const response = await fetch(`${API_URL}?active=true&closed=false&limit=100`);
+                const endTime = Date.now();
+
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                const markets = await response.json();
+                const apiTime = ((endTime - startTime) / 1000).toFixed(2);
+
+                document.getElementById('api-time').textContent = `${apiTime}s`;
+
+                return markets;
+            } catch (error) {
+                showError(`API 调用失败: ${error.message}`);
+                return [];
+            }
+        }
+
+        // 计算倒计时
+        function calculateCountdown(endDate) {
+            const now = new Date();
+            const end = new Date(endDate);
+            const diff = end - now;
+
+            if (diff <= 0) {
+                return { text: '已到期', urgent: false, soon: false, days: -1 };
+            }
+
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+            const urgent = days === 0 && hours < 24;
+            const soon = days <= 7;
+
+            if (days > 0) {
+                return {
+                    text: `${days}天 ${hours}小时`,
+                    urgent,
+                    soon,
+                    days
+                };
+            } else {
+                return {
+                    text: `${hours}小时 ${minutes}分钟`,
+                    urgent,
+                    soon,
+                    days: 0
+                };
+            }
+        }
+
+        // 过滤市场
+        function filterMarkets(filter) {
+            const now = new Date();
+            const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            const weekStart = new Date(now);
+            weekStart.setHours(0, 0, 0, 0);
+            const nextSunday = new Date(weekStart);
+            nextSunday.setDate(weekStart.getDate() + (7 - weekStart.getDay()));
+
+            return allMarkets.filter(market => {
+                const endDate = new Date(market.endDate);
+                const countdown = calculateCountdown(market.endDate);
+
+                switch(filter) {
+                    case 'urgent':
+                        return countdown.urgent;
+                    case 'soon':
+                        return countdown.soon;
+                    case 'week':
+                        return endDate >= now && endDate <= nextSunday;
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        // 渲染市场列表
+        function renderMarkets() {
+            const container = document.getElementById('market-list');
+            const filteredMarkets = filterMarkets(currentFilter);
+
+            if (filteredMarkets.length === 0) {
+                container.innerHTML = '<div class="loading">没有符合条件的市场</div>';
+                return;
+            }
+
+            // 按到期时间排序
+            const sortedMarkets = [...filteredMarkets].sort((a, b) => {
+                return new Date(a.endDate) - new Date(b.endDate);
+            });
+
+            container.innerHTML = sortedMarkets.map(market => {
+                const countdown = calculateCountdown(market.endDate);
+                const urgencyClass = countdown.urgent ? 'urgent' : (countdown.soon ? 'soon' : '');
+                const endDate = new Date(market.endDate);
+
+                return `
+                    <div class="market-card ${urgencyClass}">
+                        <h3>${market.question}</h3>
+                        <div class="market-info">
+                            <div class="end-date">
+                                到期时间: ${endDate.toLocaleString('zh-CN', {
+                                    timeZone: 'Asia/Bangkok',
+                                    year: 'numeric',
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                })} (Bangkok)
+                            </div>
+                            <div class="countdown ${urgencyClass}">
+                                ${countdown.text}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 更新统计
+        function updateStats() {
+            const filteredMarkets = filterMarkets('all');
+            const urgentCount = filterMarkets('urgent').length;
+            const weekCount = filterMarkets('soon').length;
+
+            document.getElementById('total-markets').textContent = filteredMarkets.length;
+            document.getElementById('urgent-markets').textContent = urgentCount;
+            document.getElementById('week-markets').textContent = weekCount;
+        }
+
+        // 显示错误
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            container.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // 初始化过滤器标签
+        document.querySelectorAll('.filter-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFilter = tab.dataset.filter;
+                renderMarkets();
+            });
+        });
+
+        // 初始化
+        async function init() {
+            allMarkets = await fetchMarkets();
+
+            if (allMarkets.length > 0) {
+                updateStats();
+                renderMarkets();
+
+                // 每分钟更新倒计时
+                setInterval(() => {
+                    renderMarkets();
+                }, 60000);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

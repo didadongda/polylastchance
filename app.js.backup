@@ -1,0 +1,506 @@
+// Polymarket EventTimer Pro
+// API Configuration
+const API_CONFIG = {
+    BASE_URL: 'https://gamma-api.polymarket.com/markets',
+    REFRESH_INTERVAL: 120000, // 2 minutes
+    MAX_MARKETS: 150
+};
+
+// Application State
+const AppState = {
+    allMarkets: [],
+    filteredMarkets: [],
+    currentFilter: 'all',
+    currentSort: 'time-asc',
+    searchQuery: '',
+    lastUpdate: null,
+    isLoading: false
+};
+
+// Utility Functions
+const debounce = (func, delay) => {
+    let timeout;
+    return (...args) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), delay);
+    };
+};
+
+const formatNumber = (num) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toFixed(0);
+};
+
+const formatPrice = (price) => {
+    const num = parseFloat(price);
+    if (isNaN(num)) return '-';
+    return `$${num.toFixed(2)}`;
+};
+
+// Time Calculation Functions
+const calculateCountdown = (endDate) => {
+    const now = new Date();
+    const end = new Date(endDate);
+    const diff = end - now;
+
+    if (diff <= 0) {
+        return {
+            expired: true,
+            text: '已到期',
+            urgent: false,
+            soon: false,
+            days: -1,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+            totalSeconds: 0
+        };
+    }
+
+    const totalSeconds = Math.floor(diff / 1000);
+    const days = Math.floor(totalSeconds / (60 * 60 * 24));
+    const hours = Math.floor((totalSeconds % (60 * 60 * 24)) / (60 * 60));
+    const minutes = Math.floor((totalSeconds % (60 * 60)) / 60);
+    const seconds = totalSeconds % 60;
+
+    const urgent = days === 0 && hours < 24;
+    const soon = days < 7;
+
+    let text = '';
+    if (days > 0) {
+        text = `${days}天 ${hours}小时`;
+    } else if (hours > 0) {
+        text = `${hours}小时 ${minutes}分钟`;
+    } else {
+        text = `${minutes}分钟 ${seconds}秒`;
+    }
+
+    return {
+        expired: false,
+        text,
+        urgent,
+        soon,
+        days,
+        hours,
+        minutes,
+        seconds,
+        totalSeconds
+    };
+};
+
+const calculateProgress = (startDate, endDate) => {
+    const now = new Date();
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const total = end - start;
+    const elapsed = now - start;
+
+    if (elapsed <= 0) return 0;
+    if (elapsed >= total) return 100;
+
+    return Math.min(100, Math.max(0, (elapsed / total) * 100));
+};
+
+// API Functions
+const fetchMarkets = async () => {
+    const startTime = Date.now();
+
+    try {
+        const response = await fetch(
+            `${API_CONFIG.BASE_URL}?active=true&closed=false&limit=${API_CONFIG.MAX_MARKETS}`
+        );
+
+        if (!response.ok) {
+            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const markets = await response.json();
+        const endTime = Date.now();
+        const responseTime = ((endTime - startTime) / 1000).toFixed(2);
+
+        // Update API stats
+        document.getElementById('api-time').textContent = `${responseTime}s`;
+        document.getElementById('api-status').textContent = '✓ 已连接';
+
+        return markets;
+    } catch (error) {
+        showError('API 调用失败', error.message);
+        document.getElementById('api-status').textContent = '✗ 连接失败';
+        return [];
+    }
+};
+
+// Filter Functions
+const filterMarkets = (markets, filter, searchQuery = '') => {
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setHours(0, 0, 0, 0);
+    const nextSunday = new Date(weekStart);
+    nextSunday.setDate(weekStart.getDate() + (7 - weekStart.getDay()));
+
+    let filtered = markets.filter(market => {
+        // Search filter
+        if (searchQuery) {
+            const query = searchQuery.toLowerCase();
+            const matchesSearch =
+                market.question?.toLowerCase().includes(query) ||
+                market.category?.toLowerCase().includes(query) ||
+                market.description?.toLowerCase().includes(query);
+
+            if (!matchesSearch) return false;
+        }
+
+        // Time filter
+        const endDate = new Date(market.endDate);
+        const countdown = calculateCountdown(market.endDate);
+
+        switch(filter) {
+            case 'urgent':
+                return countdown.urgent && !countdown.expired;
+            case 'soon':
+                return countdown.soon && !countdown.expired;
+            case 'week':
+                return endDate >= now && endDate <= nextSunday && !countdown.expired;
+            default:
+                return !countdown.expired;
+        }
+    });
+
+    return filtered;
+};
+
+// Sort Functions
+const sortMarkets = (markets, sortType) => {
+    const sorted = [...markets];
+
+    switch(sortType) {
+        case 'time-asc':
+            return sorted.sort((a, b) => new Date(a.endDate) - new Date(b.endDate));
+
+        case 'time-desc':
+            return sorted.sort((a, b) => new Date(b.endDate) - new Date(a.endDate));
+
+        case 'volume-desc':
+            return sorted.sort((a, b) => {
+                const volA = parseFloat(a.volume || 0);
+                const volB = parseFloat(b.volume || 0);
+                return volB - volA;
+            });
+
+        case 'liquidity-desc':
+            return sorted.sort((a, b) => {
+                const liqA = parseFloat(a.liquidity || 0);
+                const liqB = parseFloat(b.liquidity || 0);
+                return liqB - liqA;
+            });
+
+        default:
+            return sorted;
+    }
+};
+
+// UI Render Functions
+const renderMarketCard = (market) => {
+    const countdown = calculateCountdown(market.endDate);
+    const progress = calculateProgress(market.startDate, market.endDate);
+    const endDate = new Date(market.endDate);
+
+    const urgencyClass = countdown.urgent ? 'urgent' : (countdown.soon ? 'soon' : 'normal');
+    const badgeText = countdown.urgent ? '🔥 紧急' : (countdown.soon ? '⚡ 即将到期' : '✓ 正常');
+
+    const volume = formatNumber(parseFloat(market.volume || 0));
+    const liquidity = formatNumber(parseFloat(market.liquidity || 0));
+
+    const lastPrice = market.outcomePrices ?
+        JSON.parse(market.outcomePrices)[0] :
+        (market.lastTradePrice || 0);
+
+    const priceValue = parseFloat(lastPrice);
+    const pricePercent = (priceValue * 100).toFixed(1);
+
+    // Format end date for Bangkok timezone
+    const bangkokTime = endDate.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Bangkok',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+
+    return `
+        <div class="market-card ${urgencyClass}">
+            <div class="market-header">
+                <h3 class="market-title">${market.question}</h3>
+                <div class="market-badge ${urgencyClass}">${badgeText}</div>
+            </div>
+
+            <div class="countdown-section">
+                <div class="countdown-time">
+                    ${countdown.days >= 0 ? `
+                        <div class="time-unit ${urgencyClass}">
+                            <span class="time-value">${countdown.days}</span>
+                            <span class="time-label">天</span>
+                        </div>
+                    ` : ''}
+                    <div class="time-unit ${urgencyClass}">
+                        <span class="time-value">${countdown.hours.toString().padStart(2, '0')}</span>
+                        <span class="time-label">时</span>
+                    </div>
+                    <div class="time-unit ${urgencyClass}">
+                        <span class="time-value">${countdown.minutes.toString().padStart(2, '0')}</span>
+                        <span class="time-label">分</span>
+                    </div>
+                    ${countdown.days === 0 && countdown.hours < 1 ? `
+                        <div class="time-unit ${urgencyClass}">
+                            <span class="time-value">${countdown.seconds.toString().padStart(2, '0')}</span>
+                            <span class="time-label">秒</span>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill ${urgencyClass}" style="width: ${progress}%"></div>
+                    </div>
+                    <div class="progress-text">${progress.toFixed(1)}% 已过</div>
+                </div>
+            </div>
+
+            <div class="market-details">
+                <div class="detail-item">
+                    <span class="detail-label">到期时间</span>
+                    <span class="detail-value">${bangkokTime}</span>
+                </div>
+
+                <div class="detail-item">
+                    <span class="detail-label">交易量</span>
+                    <span class="detail-value highlight">$${volume}</span>
+                </div>
+
+                <div class="detail-item">
+                    <span class="detail-label">流动性</span>
+                    <span class="detail-value highlight">$${liquidity}</span>
+                </div>
+
+                <div class="detail-item">
+                    <span class="detail-label">当前价格 (Yes)</span>
+                    <span class="detail-value" style="color: ${priceValue > 0.5 ? '#10b981' : '#ef4444'}">
+                        ${pricePercent}%
+                    </span>
+                </div>
+
+                ${market.category ? `
+                    <div class="detail-item">
+                        <span class="detail-label">分类</span>
+                        <span class="detail-value">${market.category}</span>
+                    </div>
+                ` : ''}
+
+                <div class="detail-item">
+                    <span class="detail-label">市场链接</span>
+                    <a href="https://polymarket.com/event/${market.slug}"
+                       target="_blank"
+                       style="color: var(--primary-color); text-decoration: none;">
+                        查看详情 →
+                    </a>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+const renderMarkets = () => {
+    const container = document.getElementById('markets-container');
+
+    if (AppState.isLoading) {
+        container.innerHTML = `
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <div class="empty-text">正在加载市场数据...</div>
+            </div>
+        `;
+        return;
+    }
+
+    if (AppState.filteredMarkets.length === 0) {
+        const emptyMessage = AppState.searchQuery
+            ? '没有找到匹配的市场'
+            : '当前筛选条件下没有市场';
+
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">🔍</div>
+                <div class="empty-text">${emptyMessage}</div>
+            </div>
+        `;
+        return;
+    }
+
+    const sortedMarkets = sortMarkets(AppState.filteredMarkets, AppState.currentSort);
+    container.innerHTML = sortedMarkets.map(renderMarketCard).join('');
+};
+
+// Update Statistics
+const updateStats = () => {
+    const allFiltered = filterMarkets(AppState.allMarkets, 'all');
+    const urgentCount = filterMarkets(AppState.allMarkets, 'urgent').length;
+    const soonCount = filterMarkets(AppState.allMarkets, 'soon').length;
+    const weekCount = filterMarkets(AppState.allMarkets, 'week').length;
+
+    document.getElementById('total-markets').textContent = allFiltered.length;
+    document.getElementById('urgent-markets').textContent = urgentCount;
+    document.getElementById('week-markets').textContent = soonCount;
+
+    document.getElementById('count-all').textContent = allFiltered.length;
+    document.getElementById('count-urgent').textContent = urgentCount;
+    document.getElementById('count-soon').textContent = soonCount;
+    document.getElementById('count-week').textContent = weekCount;
+
+    const totalChange = document.getElementById('total-change');
+    if (AppState.lastUpdate) {
+        const timeSince = Math.floor((Date.now() - AppState.lastUpdate) / 1000 / 60);
+        totalChange.textContent = `${timeSince}分钟前更新`;
+    } else {
+        totalChange.textContent = '首次加载';
+    }
+};
+
+// Error Display
+const showError = (title, message) => {
+    const container = document.getElementById('error-container');
+    container.innerHTML = `
+        <div class="error-container">
+            <div class="error-title">⚠️ ${title}</div>
+            <div class="error-message">${message}</div>
+        </div>
+    `;
+
+    setTimeout(() => {
+        container.innerHTML = '';
+    }, 10000);
+};
+
+// Event Listeners
+const setupEventListeners = () => {
+    // Filter tabs
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            AppState.currentFilter = tab.dataset.filter;
+            AppState.filteredMarkets = filterMarkets(
+                AppState.allMarkets,
+                AppState.currentFilter,
+                AppState.searchQuery
+            );
+            renderMarkets();
+        });
+    });
+
+    // Sort buttons
+    document.querySelectorAll('.sort-button').forEach(button => {
+        button.addEventListener('click', () => {
+            document.querySelectorAll('.sort-button').forEach(b => b.classList.remove('active'));
+            button.classList.add('active');
+
+            AppState.currentSort = button.dataset.sort;
+            renderMarkets();
+        });
+    });
+
+    // Search input
+    const searchInput = document.getElementById('search-input');
+    const clearButton = document.getElementById('clear-search');
+
+    searchInput.addEventListener('input', debounce((e) => {
+        AppState.searchQuery = e.target.value;
+        AppState.filteredMarkets = filterMarkets(
+            AppState.allMarkets,
+            AppState.currentFilter,
+            AppState.searchQuery
+        );
+        renderMarkets();
+        updateStats();
+
+        clearButton.style.display = AppState.searchQuery ? 'block' : 'none';
+    }, 300));
+
+    clearButton.addEventListener('click', () => {
+        searchInput.value = '';
+        AppState.searchQuery = '';
+        AppState.filteredMarkets = filterMarkets(
+            AppState.allMarkets,
+            AppState.currentFilter,
+            ''
+        );
+        renderMarkets();
+        updateStats();
+        clearButton.style.display = 'none';
+    });
+};
+
+// Data Loading
+const loadData = async () => {
+    AppState.isLoading = true;
+    renderMarkets();
+
+    const markets = await fetchMarkets();
+
+    if (markets.length > 0) {
+        AppState.allMarkets = markets;
+        AppState.filteredMarkets = filterMarkets(
+            markets,
+            AppState.currentFilter,
+            AppState.searchQuery
+        );
+        AppState.lastUpdate = Date.now();
+        AppState.isLoading = false;
+
+        updateStats();
+        renderMarkets();
+    } else {
+        AppState.isLoading = false;
+        showError('数据加载失败', '无法获取市场数据，请检查网络连接');
+    }
+};
+
+// Auto Refresh
+const startAutoRefresh = () => {
+    setInterval(() => {
+        loadData();
+        console.log('🔄 Auto-refreshing market data...');
+    }, API_CONFIG.REFRESH_INTERVAL);
+};
+
+// Countdown Update
+const startCountdownUpdate = () => {
+    setInterval(() => {
+        if (AppState.filteredMarkets.length > 0) {
+            renderMarkets();
+        }
+    }, 1000); // Update every second
+};
+
+// Initialize Application
+const init = async () => {
+    console.log('🚀 EventTimer Pro initializing...');
+
+    setupEventListeners();
+    await loadData();
+    startAutoRefresh();
+    startCountdownUpdate();
+
+    console.log('✅ EventTimer Pro ready!');
+};
+
+// Start the app
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
