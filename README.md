@@ -1,4 +1,4 @@
-# ⏰ EventTimer Pro - Polymarket 事件节奏表
+# ⏰ PolyLastChance - Polymarket 事件节奏表
 
 一个现代化的 Polymarket 市场倒计时追踪工具，帮助交易者把握最佳时机。
 
