@@ -3,7 +3,7 @@
 
 // API Configuration
 const API_CONFIG = {
-    BASE_URL: 'https://gamma-api.polymarket.com/markets',
+    BASE_URL: 'https://api.codetabs.com/v1/proxy/?quest=https://gamma-api.polymarket.com/markets',
     REFRESH_INTERVAL: 120000, // 2 minutes
     MAX_MARKETS: 150
 };
